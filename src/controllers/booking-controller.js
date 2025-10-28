@@ -1,10 +1,12 @@
 const {BookingService} = require('../services')
 const { SuccessResponse, ErrorResponse } = require("../utils/common");
+const { StatusCodes } = require('http-status-codes');
 
 async function createBooking(req,res){
   try {
     const response = await BookingService.createBooking({
       flightId:req.body.flightId,
+      userId:req.body.userId
     })
     SuccessResponse.data = response
     return res
