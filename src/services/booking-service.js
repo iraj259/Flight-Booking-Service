@@ -134,4 +134,14 @@ async function cancelBooking(bookingId) {
   }
 }
 
-module.exports = { createBooking, makePayment, cancelBooking };
+async function cancelOldBookings(){
+    try {
+        const time = new Date()
+        const response = await bookingRepository.cancelOldBookings(time)
+        return response
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+module.exports = { createBooking, makePayment, cancelBooking, cancelOldBookings };
