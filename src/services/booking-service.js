@@ -1,53 +1,60 @@
 const axios = require("axios");
-const { BookingRepository } = require("../repositories");
 const { StatusCodes } = require("http-status-codes");
 const { ServerConfig } = require("../config");
 const db = require("../models");
+const { BookingRepository } = require("../repositories");
 const AppError = require("../utils/errors/app-error");
 
+const bookingRepository = new BookingRepository();
+
 async function createBooking(data) {
-  return new Promise(async (resolve, reject) => {
-    const t = await db.sequelize.transaction();
-    try {
-      // Fetch flight details
-      const flightResponse = await axios.get(
-        `${ServerConfig.FLIGHT_SERVICE}/api/v1/flights/${data.flightId}`
-      );
+  const t = await db.sequelize.transaction();
+  try {
+    // Fetch flight details
+    const flightResponse = await axios.get(
+      `${ServerConfig.FLIGHT_SERVICE}/api/v1/flights/${data.flightId}`
+    );
 
-      // Handle both response formats (single object or array)
-      let flightData = flightResponse.data.data;
-      if (Array.isArray(flightData)) flightData = flightData[0];
+    let flightData = flightResponse.data.data;
+    if (Array.isArray(flightData)) flightData = flightData[0];
 
-      // Handle both naming cases for seat inputs
-      const requestedSeats = data.noOfSeats ?? data.noofSeats;
-      const availableSeats = flightData.totalSeats ?? flightData.totalseats;
+    const requestedSeats = data.noOfSeats ?? data.noofSeats;
+    const availableSeats = flightData.totalSeats ?? flightData.totalseats;
 
-      console.log("DEBUG => Seats requested:", requestedSeats, "Available:", availableSeats);
+    console.log("DEBUG => Seats requested:", requestedSeats, "Available:", availableSeats);
 
-      // Validation checks
-      if (!requestedSeats || isNaN(requestedSeats)) {
-        await t.rollback();
-        return reject(new AppError("Invalid seat number", StatusCodes.BAD_REQUEST));
-      }
-
-      if (requestedSeats > availableSeats) {
-        await t.rollback();
-        return reject(new AppError("Not enough seats available", StatusCodes.BAD_REQUEST));
-      }
-
-      // If valid, proceed (for now just resolving true)
-      await t.commit();
-      console.log("All good, resolving...");
-      resolve(true);
-
-    } catch (error) {
-      await t.rollback();
-      console.log("Error inside createBooking:", error);
-      reject(error);
+    if (!requestedSeats || isNaN(requestedSeats)) {
+      throw new AppError("Invalid seat number", StatusCodes.BAD_REQUEST);
     }
-  });
+
+    if (requestedSeats > availableSeats) {
+      throw new AppError("Not enough seats available", StatusCodes.BAD_REQUEST);
+    }
+
+    // Calculate total cost
+    const totalBillingAmount = requestedSeats * flightData.price;
+
+    // Create booking in DB
+    const bookingPayload = { ...data, totalCost: totalBillingAmount };
+    const booking = await bookingRepository.create(bookingPayload, { transaction: t });
+
+    // Update flight seats
+    await axios.patch(
+      `${ServerConfig.FLIGHT_SERVICE}/api/v1/flights/${data.flightId}/seats`,
+      { seats: requestedSeats }
+    );
+
+    await t.commit();
+    console.log("Booking successful ✅");
+    return booking;
+
+  } catch (error) {
+    if (t && !t.finished) {
+      await t.rollback();
+    }
+    console.error("Error inside createBooking:", error);
+    throw error;
+  }
 }
 
-module.exports = {
-  createBooking,
-};
+module.exports = { createBooking };
